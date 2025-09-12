@@ -82,7 +82,7 @@ static PyObject* my_shared(PyObject* self, PyObject* args, PyObject* kwargs) {
         char map_file[100];
         int map_id = rand() % num_maps;
         Drive* env = calloc(1, sizeof(Drive));
-        sprintf(map_file, "resources/drive/binaries/map_%03d.bin", map_id);
+        sprintf(map_file, "/datasets_local/yyin5/gpudrive_original/data/binaries/training/map_%06d.bin", map_id);
         env->entities = load_map_binary(map_file, env);
         set_active_agents(env);
         // Store map_id
@@ -147,7 +147,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     int max_agents = unpack(kwargs, "max_agents");
 
     char map_file[100];
-    sprintf(map_file, "resources/drive/binaries/map_%03d.bin", map_id);
+    sprintf(map_file, "/datasets_local/yyin5/gpudrive_original/data/binaries/training/map_%06d.bin", map_id);
     env->num_agents = max_agents;
     env->map_name = strdup(map_file);
     init(env);

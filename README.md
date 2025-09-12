@@ -21,3 +21,12 @@ All of our documentation is hosted at [puffer.ai](https://puffer.ai "PufferLib D
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date" />
  </picture>
 </a>
+
+
+## Note on the editable installation
+
+```bash
+pip install -e . --no-build-isolation
+```
+
+The original installation with `python setup.py` fails when the nvcc version mismatch with torch.

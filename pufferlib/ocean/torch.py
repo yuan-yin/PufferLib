@@ -786,40 +786,41 @@ class ImpulseWarsPolicy(nn.Module):
             return self.mapCNN(t).shape[1]
 
 class Drive(nn.Module):
-    def __init__(self, env, input_size=128, hidden_size=128, **kwargs):
+    def __init__(self, env, input_size=64, hidden_size=128, act_func="tanh", dropout_rate=0.01, **kwargs):
         super().__init__()
-        self.hidden_size = hidden_size
+        self.input_dim = input_size
+        self.hidden_dim = hidden_size
+        self.act_func = nn.Tanh() if act_func == "tanh" else nn.GELU()
         self.ego_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Linear(7, input_size)),
-            nn.LayerNorm(input_size),
-            # nn.ReLU(),
+                nn.Linear(6, self.input_dim)),
+            nn.LayerNorm(self.input_dim),
+            self.act_func,
+            # nn.Dropout(p=dropout_rate),
             pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size))
+                nn.Linear(self.input_dim, self.input_dim))
         )
-        max_road_objects = 13
         self.road_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Linear(max_road_objects, input_size)),
-            nn.LayerNorm(input_size),
-            # nn.ReLU(),
+                nn.Linear(13, self.input_dim)),
+            nn.LayerNorm(self.input_dim),
+            self.act_func,
+            # nn.Dropout(p=dropout_rate),
             pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size))
+                nn.Linear(self.input_dim, self.input_dim))
         )
-        max_partner_objects = 7
         self.partner_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Linear(max_partner_objects, input_size)),
-            nn.LayerNorm(input_size),
-            # nn.ReLU(),
+                nn.Linear(7, self.input_dim)),
+            nn.LayerNorm(self.input_dim),
+            self.act_func,
+            # nn.Dropout(p=dropout_rate),
             pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size))
+                nn.Linear(self.input_dim, self.input_dim))
         )
 
-
         self.shared_embedding = nn.Sequential(
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(3*input_size,  hidden_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(3 * self.input_dim, self.hidden_dim)),
         )
         self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
 
@@ -827,20 +828,20 @@ class Drive(nn.Module):
         self.actor = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, sum(self.atn_dim)), std = 0.01)
         self.value_fn = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, 1 ), std=1)
+                nn.Linear(hidden_size, 1), std=1)
     
-    def forward(self, observations, state=None):
+    def forward_eval(self, observations, state=None):
         hidden = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden)
         return actions, value
 
-    def forward_train(self, x, state=None):
-        return self.forward(x, state)
+    def forward(self, x, state=None):
+        return self.forward_eval(x, state)
    
     def encode_observations(self, observations, state=None):
-        ego_dim = 7
+        ego_dim = 6
         partner_dim = 63 * 7
-        road_dim = 200*7
+        road_dim = 200 * 7
         ego_obs = observations[:, :ego_dim]
         partner_obs = observations[:, ego_dim:ego_dim+partner_dim]
         road_obs = observations[:, ego_dim+partner_dim:ego_dim+partner_dim+road_dim]
@@ -858,7 +859,7 @@ class Drive(nn.Module):
         concat_features = torch.cat([ego_features, road_features, partner_features], dim=1)
         
         # Pass through shared embedding
-        embedding = F.relu(self.shared_embedding(concat_features))
+        embedding = F.gelu(self.shared_embedding(concat_features))
         # embedding = self.shared_embedding(concat_features)
         return embedding
     
