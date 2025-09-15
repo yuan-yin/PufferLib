@@ -791,7 +791,7 @@ int valid_active_agent(Drive* env, int agent_idx){
     return 0;
 }
 
-void set_active_agents(Drive* env){
+void set_active_agents(Drive* env) {
     env->active_agent_count = 0;
     env->static_car_count = 0;
     env->num_cars = 1;
@@ -800,12 +800,11 @@ void set_active_agents(Drive* env){
     int static_car_indices[MAX_CARS];
     int expert_static_car_indices[MAX_CARS];
     
-    if(env->num_agents ==0){
+    if (env->num_agents ==0)
         env->num_agents = MAX_CARS;
-    }
     int first_agent_id = env->num_objects-1;
     float distance_to_goal = valid_active_agent(env, first_agent_id);
-    if(distance_to_goal){
+    if (distance_to_goal) {
         env->active_agent_count = 1;
         active_agent_indices[0] = first_agent_id;
         env->entities[first_agent_id].active_agent = 1;
@@ -814,12 +813,12 @@ void set_active_agents(Drive* env){
         env->active_agent_count = 0;
         env->num_cars = 0;
     }
-    for(int i = 0; i < env->num_objects-1 && env->num_cars < MAX_CARS; i++){
+    for (int i = 0; i < env->num_objects-1 && env->num_cars < MAX_CARS; i++) {
         if(env->entities[i].type != 1) continue;
         if(env->entities[i].traj_valid[0] != 1) continue;
         env->num_cars++;
         float distance_to_goal = valid_active_agent(env, i);
-        if(distance_to_goal > 0){
+        if (distance_to_goal > 0) {
             active_agent_indices[env->active_agent_count] = i;
             env->active_agent_count++;
             env->entities[i].active_agent = 1;
@@ -827,7 +826,7 @@ void set_active_agents(Drive* env){
             static_car_indices[env->static_car_count] = i;
             env->static_car_count++;
             env->entities[i].active_agent = 0;
-            if(env->entities[i].mark_as_expert == 1 || (distance_to_goal >=2.0f && env->active_agent_count == env->num_agents)){
+            if (env->entities[i].mark_as_expert == 1 || (distance_to_goal >=2.0f && env->active_agent_count == env->num_agents)) {
                 expert_static_car_indices[env->expert_static_car_count] = i;
                 env->expert_static_car_count++;
                 env->entities[i].mark_as_expert = 1;
@@ -851,7 +850,7 @@ void set_active_agents(Drive* env){
     return;
 }
 
-void remove_bad_trajectories(Drive* env){
+void remove_bad_trajectories(Drive* env) {
     set_start_position(env);
     int legal_agent_count = 0;
     int legal_trajectories[env->active_agent_count];
@@ -860,11 +859,11 @@ void remove_bad_trajectories(Drive* env){
     memset(collided_agents, 0, env->active_agent_count * sizeof(int));
     // move experts through trajectories to check for collisions and remove as illegal agents
     for(int t = 0; t < TRAJECTORY_LENGTH; t++){
-        for(int i = 0; i < env->active_agent_count; i++){
+        for(int i = 0; i < env->active_agent_count; i++) {
             int agent_idx = env->active_agent_indices[i];
             move_expert(env, env->actions, agent_idx);
         }
-        for(int i = 0; i < env->expert_static_car_count; i++){
+        for(int i = 0; i < env->expert_static_car_count; i++) {
             int expert_idx = env->expert_static_car_indices[i];
             if(env->entities[expert_idx].x == -10000) continue;
             move_expert(env, env->actions, expert_idx);
@@ -874,7 +873,7 @@ void remove_bad_trajectories(Drive* env){
             int agent_idx = env->active_agent_indices[i];
             env->entities[agent_idx].collision_state = 0;
             int collided_with_index = collision_check(env, agent_idx);
-            if(env->entities[agent_idx].collision_state > 0 && collided_agents[i] == 0){
+            if (env->entities[agent_idx].collision_state > 0 && collided_agents[i] == 0) {
                 collided_agents[i] = 1;
                 collided_with_indices[i] = collided_with_index;
             }
@@ -882,9 +881,9 @@ void remove_bad_trajectories(Drive* env){
         env->timestep++;
     }
 
-    for(int i = 0; i< env->active_agent_count; i++){
-        if(collided_with_indices[i] == -1) continue;
-        for(int j = 0; j < env->static_car_count; j++){
+    for (int i = 0; i< env->active_agent_count; i++){
+        if (collided_with_indices[i] == -1) continue;
+        for (int j = 0; j < env->static_car_count; j++){
             int static_car_idx = env->static_car_indices[j];
             if(static_car_idx != collided_with_indices[i]) continue;
             env->entities[static_car_idx].traj_x[0] = -10000;
@@ -893,6 +892,7 @@ void remove_bad_trajectories(Drive* env){
     }
     env->timestep = 0;
 }
+
 void init(Drive* env){
     env->human_agent_idx = 0;
     env->timestep = 0;
@@ -902,16 +902,16 @@ void init(Drive* env){
     init_grid_map(env);
     env->vision_range = 21;
     init_neighbor_offsets(env);
-    env->neighbor_cache_indices = (int*)calloc((env->grid_cols*env->grid_rows) + 1, sizeof(int));
+    env->neighbor_cache_indices = (int*) calloc((env->grid_cols * env->grid_rows) + 1, sizeof(int));
     cache_neighbor_offsets(env);
     set_active_agents(env);
     remove_bad_trajectories(env);
     set_start_position(env);
-    env->logs = (Log*)calloc(env->active_agent_count, sizeof(Log));
+    env->logs = (Log*) calloc(env->active_agent_count, sizeof(Log));
 }
 
 void c_close(Drive* env){
-    for(int i = 0; i < env->num_entities; i++){
+    for (int i = 0; i < env->num_entities; i++) {
         free_entity(&env->entities[i]);
     }
     free(env->entities);
@@ -935,14 +935,14 @@ void allocate(Drive* env){
     // printf("num static cars: %d\n", env->static_car_count);
     // printf("active agent count: %d\n", env->active_agent_count);
     // printf("num objects: %d\n", env->num_objects);
-    env->observations = (float*)calloc(env->active_agent_count*max_obs, sizeof(float));
-    env->actions = (int*)calloc(env->active_agent_count*2, sizeof(int));
-    env->rewards = (float*)calloc(env->active_agent_count, sizeof(float));
-    env->terminals= (unsigned char*)calloc(env->active_agent_count, sizeof(unsigned char));
+    env->observations = (float*) calloc(env->active_agent_count * max_obs, sizeof(float));
+    env->actions = (int*) calloc(env->active_agent_count * 2, sizeof(int));
+    env->rewards = (float*) calloc(env->active_agent_count, sizeof(float));
+    env->terminals= (unsigned char*) calloc(env->active_agent_count, sizeof(unsigned char));
     // printf("allocated\n");
 }
 
-void free_allocated(Drive* env){
+void free_allocated(Drive* env) {
     free(env->observations);
     free(env->actions);
     free(env->rewards);
@@ -957,10 +957,11 @@ float clipSpeed(float speed) {
     return speed;
 }
 
-float normalize_heading(float heading){
-    if(heading > M_PI) heading -= 2*M_PI;
-    if(heading < -M_PI) heading += 2*M_PI;
-    return heading;
+float wrap_heading(float x){
+    float y = fmodf(x + PI, 2.0f * PI);
+    if (y <= 0.0f)
+        y += 2.0f * PI;
+    return y - PI;
 }
 
 void move_dynamics(Drive* env, int action_idx, int agent_idx){
