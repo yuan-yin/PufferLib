@@ -90,7 +90,7 @@ class Drive(pufferlib.PufferEnv):
             if log:
                 info.append(log)
                 #print(log)
-        if(self.tick > 0 and self.resample_frequency > 0 and self.tick % self.resample_frequency == 0):
+        if self.tick > 0 and self.resample_frequency > 0 and self.tick % self.resample_frequency == 0:
             self.tick = 0
             will_resample = 1
             if will_resample:
@@ -122,8 +122,7 @@ class Drive(pufferlib.PufferEnv):
 
                 binding.vec_reset(self.c_envs, seed)
                 self.terminals[:] = 1
-        return (self.observations, self.rewards,
-            self.terminals, self.truncations, info)
+        return (self.observations, self.rewards, self.terminals, self.truncations, info)
 
     def render(self):
         binding.vec_render(self.c_envs, 0)
@@ -246,15 +245,15 @@ def save_map_binary(map_data, output_file):
             elif(road_type_word == "road_edge"):
                 road_type = 15
             # breakpoint()
-            if(len(geometry) > 10 and road_type <=16):
+            if(len(geometry) > 10 and road_type <= 16):
                 geometry = simplify_polyline(geometry, .1)
             size = len(geometry)
             # breakpoint()
-            if(road_type >=0 and road_type <=3):
+            if(road_type >=0 and road_type <= 3):
                 road_type = 4
-            elif(road_type >=5 and road_type <=13):
+            elif(road_type >= 5 and road_type <= 13):
                 road_type = 5
-            elif(road_type >=14 and road_type <=16):
+            elif(road_type >= 14 and road_type <= 16):
                 road_type = 6
             elif(road_type == 17):
                 road_type = 7

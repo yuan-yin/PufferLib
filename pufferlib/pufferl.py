@@ -58,9 +58,6 @@ class PuffeRL:
 
         # Reproducibility
         seed = config['seed']
-        #random.seed(seed)
-        #np.random.seed(seed)
-        #torch.manual_seed(seed)
 
         # Vecenv info
         vecenv.async_reset(seed)
@@ -476,9 +473,6 @@ class PuffeRL:
             **{f'environment/{k}': v for k, v in self.stats.items()},
             **{f'losses/{k}': v for k, v in self.losses.items()},
             **{f'performance/{k}': v['elapsed'] for k, v in self.profile},
-            #**{f'environment/{k}': dist_mean(v, device) for k, v in self.stats.items()},
-            #**{f'losses/{k}': dist_mean(v, device) for k, v in self.losses.items()},
-            #**{f'performance/{k}': dist_sum(v['elapsed'], device) for k, v in self.profile},
         }
 
         if torch.distributed.is_initialized():

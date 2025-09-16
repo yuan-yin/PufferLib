@@ -70,8 +70,7 @@
 static const float ACCELERATION_VALUES[9] = {-4.0000f, -3.0000f, -2.0000f, -1.0000f, -0.0000f, 1.0000f, 2.0000f, 3.0000f, 4.0000f};
 // static const float STEERING_VALUES[13] = {-3.1420f, -2.6180f, -2.0940f, -1.5710f, -1.0470f, -0.5240f,  0.0000f,  0.5240f,
 //          1.0470f,  1.5710f,  2.0940f,  2.6180f,  3.1420f};
-static const float STEERING_VALUES[13] = {-0.6f, -0.5f, -0.4f, -0.3f, -0.2f, -0.1f, 0.f, 0.1f, 0.2f, 0.3f, 0.4f,
-                                          0.5f, 0.6f};
+static const float STEERING_VALUES[13] = {-0.6f, -0.5f, -0.4f, -0.3f, -0.2f, -0.1f, 0.f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f};
 static const float offsets[4][2] = {
     {-1, 1}, // top-left
     {1, 1},  // top-right
@@ -81,26 +80,10 @@ static const float offsets[4][2] = {
 
 static const int collision_offsets[25][2] = {
     {-2, -2}, {-1, -2}, {0, -2}, {1, -2}, {2, -2}, // Top row
-    {-2, -1},
-    {-1, -1},
-    {0, -1},
-    {1, -1},
-    {2, -1}, // Second row
-    {-2, 0},
-    {-1, 0},
-    {0, 0},
-    {1, 0},
-    {2, 0}, // Middle row (including center)
-    {-2, 1},
-    {-1, 1},
-    {0, 1},
-    {1, 1},
-    {2, 1}, // Fourth row
-    {-2, 2},
-    {-1, 2},
-    {0, 2},
-    {1, 2},
-    {2, 2} // Bottom row
+    {-2, -1}, {-1, -1}, {0, -1}, {1, -1}, {2, -1}, // Second row
+    {-2, 0}, {-1, 0}, {0, 0}, {1, 0}, {2, 0}, // Middle row (including center)
+    {-2, 1}, {-1, 1}, {0, 1}, {1, 1}, {2, 1}, // Fourth row
+    {-2, 2}, {-1, 2}, {0, 2}, {1, 2}, {2, 2} // Bottom row
 };
 
 struct timespec ts;
@@ -1147,7 +1130,7 @@ float normalize_value(float value, float min, float max)
 
 float reverse_normalize_value(float value, float min, float max)
 {
-    return value * 50.0f;
+    return value * (max - min) + min;
 }
 
 void compute_observations(Drive *env)
