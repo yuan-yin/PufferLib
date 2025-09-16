@@ -349,26 +349,26 @@ void set_start_position(Drive *env)
     int x = 0;
 }
 
-int getGridIndex(Drive *env, float x1, float y1)
+int get_grid_index(Drive *env, float x1, float y1)
 {
     if (env->map_corners[0] >= env->map_corners[2] || env->map_corners[1] >= env->map_corners[3])
     {
         printf("Invalid grid coordinates\n");
         return -1; // Invalid grid coordinates
     }
-    float worldWidth = env->map_corners[2] - env->map_corners[0];  // Positive value
-    float worldHeight = env->map_corners[3] - env->map_corners[1]; // Positive value
-    int cellsX = (int)ceil(worldWidth / GRID_CELL_SIZE);           // Number of columns
-    int cellsY = (int)ceil(worldHeight / GRID_CELL_SIZE);          // Number of rows
-    float relativeX = x1 - env->map_corners[0];                    // Distance from left
-    float relativeY = y1 - env->map_corners[1];                    // Distance from top
-    int gridX = (int)(relativeX / GRID_CELL_SIZE);                 // Column index
-    int gridY = (int)(relativeY / GRID_CELL_SIZE);                 // Row index
-    if (gridX < 0 || gridX >= cellsX || gridY < 0 || gridY >= cellsY)
+    float world_width = env->map_corners[2] - env->map_corners[0];  // Positive value
+    float world_height = env->map_corners[3] - env->map_corners[1]; // Positive value
+    int cells_x = (int)ceil(world_width / GRID_CELL_SIZE);           // Number of columns
+    int cells_y = (int)ceil(world_height / GRID_CELL_SIZE);          // Number of rows
+    float relative_x = x1 - env->map_corners[0];                    // Distance from left
+    float relative_y = y1 - env->map_corners[1];                    // Distance from top
+    int grid_x = (int)(relative_x / GRID_CELL_SIZE);                 // Column index
+    int grid_y = (int)(relative_y / GRID_CELL_SIZE);                 // Row index
+    if (grid_x < 0 || grid_x >= cells_x || grid_y < 0 || grid_y >= cells_y)
     {
         return -1; // Return -1 for out of bounds
     }
-    int index = (gridY * cellsX) + gridX;
+    int index = (grid_y * cells_x) + grid_x;
     return index;
 }
 
@@ -448,7 +448,7 @@ void init_grid_map(Drive *env)
             {
                 float x_center = (env->entities[i].traj_x[j] + env->entities[i].traj_x[j + 1]) / 2;
                 float y_center = (env->entities[i].traj_y[j] + env->entities[i].traj_y[j + 1]) / 2;
-                int grid_index = getGridIndex(env, x_center, y_center);
+                int grid_index = get_grid_index(env, x_center, y_center);
                 add_entity_to_grid(env, grid_index, i, j);
             }
         }
@@ -621,7 +621,7 @@ void set_means(Drive *env)
     }
 }
 
-void move_expert(Drive *env, int *actions, int agent_idx)
+void move_expert(Drive *env, int agent_idx)
 {
     Entity *agent = &env->entities[agent_idx];
     agent->x = agent->traj_x[env->timestep];
@@ -663,33 +663,33 @@ bool check_line_intersection(float p1[2], float p2[2], float q1[2], float q2[2])
     return (s >= 0 && s <= 1 && t >= 0 && t <= 1);
 }
 
-int checkNeighbors(Drive *env, float x, float y, int *entity_list, int max_size, const int (*local_offsets)[2], int offset_size)
+int check_neighbors(Drive *env, float x, float y, int *entity_list, int max_size, const int (*local_offsets)[2], int offset_size)
 {
     // Get the grid index for the given position (x, y)
-    int index = getGridIndex(env, x, y);
+    int index = get_grid_index(env, x, y);
     if (index == -1)
         return 0; // Return 0 size if position invalid
     // Calculate 2D grid coordinates
-    int cellsX = env->grid_cols;
-    int gridX = index % cellsX;
-    int gridY = index / cellsX;
+    int cells_x = env->grid_cols;
+    int grid_x = index % cells_x;
+    int grid_y = index / cells_x;
     int entity_list_count = 0;
     // Fill the provided array
     for (int i = 0; i < offset_size; i++)
     {
-        int nx = gridX + local_offsets[i][0];
-        int ny = gridY + local_offsets[i][1];
+        int nx = grid_x + local_offsets[i][0];
+        int ny = grid_y + local_offsets[i][1];
         // Ensure the neighbor is within grid bounds
         if (nx < 0 || nx >= env->grid_cols || ny < 0 || ny >= env->grid_rows)
             continue;
-        int neighborIndex = (ny * env->grid_cols + nx) * SLOTS_PER_CELL;
-        int count = env->grid_cells[neighborIndex];
+        int neighbor_idx = (ny * env->grid_cols + nx) * SLOTS_PER_CELL;
+        int count = env->grid_cells[neighbor_idx];
         // Add entities from this cell to the list
         for (int j = 0; j < count && entity_list_count < max_size; j++)
         {
-            int entityId = env->grid_cells[neighborIndex + 1 + j * 2];
-            int geometry_idx = env->grid_cells[neighborIndex + 2 + j * 2];
-            entity_list[entity_list_count] = entityId;
+            int entity_id = env->grid_cells[neighbor_idx + 1 + j * 2];
+            int geometry_idx = env->grid_cells[neighbor_idx + 2 + j * 2];
+            entity_list[entity_list_count] = entity_id;
             entity_list[entity_list_count + 1] = geometry_idx;
             entity_list_count += 2;
         }
@@ -782,7 +782,7 @@ int collision_check(Drive *env, int agent_idx)
     int collided = 0;
     int car_collided_with_index = -1;
     int entity_list[MAX_ENTITIES_PER_CELL * 2 * 25]; // Array big enough for all neighboring cells
-    int list_size = checkNeighbors(env, agent->x, agent->y, entity_list, MAX_ENTITIES_PER_CELL * 2 * 25, collision_offsets, 25);
+    int list_size = check_neighbors(env, agent->x, agent->y, entity_list, MAX_ENTITIES_PER_CELL * 2 * 25, collision_offsets, 25);
     for (int i = 0; i < list_size; i += 2)
     {
         if (entity_list[i] == -1)
@@ -952,14 +952,14 @@ void remove_bad_trajectories(Drive *env)
         for (int i = 0; i < env->active_agent_count; i++)
         {
             int agent_idx = env->active_agent_indices[i];
-            move_expert(env, env->actions, agent_idx);
+            move_expert(env, agent_idx);
         }
         for (int i = 0; i < env->expert_static_car_count; i++)
         {
             int expert_idx = env->expert_static_car_indices[i];
             if (env->entities[expert_idx].x == -10000)
                 continue;
-            move_expert(env, env->actions, expert_idx);
+            move_expert(env, expert_idx);
         }
         // check collisions
         for (int i = 0; i < env->active_agent_count; i++)
@@ -1031,16 +1031,10 @@ void allocate(Drive *env)
 {
     init(env);
     int max_obs = DIM_EGO + DIM_PARTNER * (MAX_CARS - 1) + DIM_ROAD * MAX_ROAD_SEGMENT_OBSERVATIONS;
-    // printf("max obs: %d\n", max_obs*env->active_agent_count);
-    // printf("num cars: %d\n", env->num_cars);
-    // printf("num static cars: %d\n", env->static_car_count);
-    // printf("active agent count: %d\n", env->active_agent_count);
-    // printf("num objects: %d\n", env->num_objects);
     env->observations = (float *)calloc(env->active_agent_count * max_obs, sizeof(float));
     env->actions = (int *)calloc(env->active_agent_count * 2, sizeof(int));
     env->rewards = (float *)calloc(env->active_agent_count, sizeof(float));
     env->terminals = (unsigned char *)calloc(env->active_agent_count, sizeof(unsigned char));
-    // printf("allocated\n");
 }
 
 void free_allocated(Drive *env)
@@ -1052,13 +1046,13 @@ void free_allocated(Drive *env)
     c_close(env);
 }
 
-float clipSpeed(float speed)
+float clip_speed(float speed)
 {
-    const float maxSpeed = MAX_SPEED;
-    if (speed > maxSpeed)
-        return maxSpeed;
-    if (speed < -maxSpeed)
-        return -maxSpeed;
+    const float max_speed = MAX_SPEED;
+    if (speed > max_speed)
+        return max_speed;
+    if (speed < -max_speed)
+        return -max_speed;
     return speed;
 }
 
@@ -1070,18 +1064,12 @@ float wrap_heading(float x)
     return y - PI;
 }
 
-void move_dynamics(Drive *env, int action_idx, int agent_idx)
+void move_dynamics(Drive *env, int agent_idx, float acceleration, float steering)
 {
     if (env->dynamics_model == CLASSIC)
     {
         // clip acceleration & steering
         Entity *agent = &env->entities[agent_idx];
-        // Extract action components directly from the multi-discrete action array
-        int (*action_array)[2] = (int (*)[2])env->actions;
-        int acceleration_index = action_array[action_idx][0];
-        int steering_index = action_array[action_idx][1];
-        float acceleration = ACCELERATION_VALUES[acceleration_index];
-        float steering = STEERING_VALUES[steering_index];
 
         // Current state
         float x = agent->x;
@@ -1098,7 +1086,7 @@ void move_dynamics(Drive *env, int action_idx, int agent_idx)
         // Update speed with acceleration
         speed = speed + 0.5f * acceleration * dt;
         // if (speed < 0) speed = 0;  // Prevent going backward
-        speed = clipSpeed(speed);
+        speed = clip_speed(speed);
         // compute yaw rate
         float beta = tanh(.5 * tanf(steering));
         // new heading
@@ -1227,7 +1215,7 @@ void compute_observations(Drive *env)
         obs_idx += remaining_partner_obs;
         // map observations
         int entity_list[MAX_ROAD_SEGMENT_OBSERVATIONS * 2]; // Array big enough for all neighboring cells
-        int grid_idx = getGridIndex(env, ego_entity->x, ego_entity->y);
+        int grid_idx = get_grid_index(env, ego_entity->x, ego_entity->y);
         int list_size = get_neighbor_cache_entities(env, grid_idx, entity_list, MAX_ROAD_SEGMENT_OBSERVATIONS);
         for (int k = 0; k < list_size; k++)
         {
@@ -1323,7 +1311,7 @@ void c_step(Drive *env)
         int expert_idx = env->expert_static_car_indices[i];
         if (env->entities[expert_idx].x == -10000.0f)
             continue;
-        move_expert(env, env->actions, expert_idx);
+        move_expert(env, expert_idx);
     }
     // Process actions for all active agents
     for (int i = 0; i < env->active_agent_count; i++)
@@ -1332,14 +1320,19 @@ void c_step(Drive *env)
         env->logs[i].episode_length += 1;
         int agent_idx = env->active_agent_indices[i];
         env->entities[agent_idx].collision_state = 0;
-        move_dynamics(env, i, agent_idx);
-        // move_expert(env, env->actions, agent_idx);
+                // Extract action components directly from the multi-discrete action array
+        int (*action_array)[2] = (int (*)[2])env->actions;
+        int acceleration_index = action_array[i][0]; 
+        int steering_index = action_array[i][1];
+        float accel = ACCELERATION_VALUES[acceleration_index];
+        float steer = STEERING_VALUES[steering_index];
+        
+        move_dynamics(env, agent_idx, accel, steer);
     }
     for (int i = 0; i < env->active_agent_count; i++)
     {
         int agent_idx = env->active_agent_indices[i];
         env->entities[agent_idx].collision_state = 0;
-        // if(env->entities[agent_idx].respawn_timestep != -1) continue;
         collision_check(env, agent_idx);
         int collision_state = env->entities[agent_idx].collision_state;
 
