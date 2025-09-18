@@ -36,10 +36,8 @@ class Drive(pufferlib.PufferEnv):
         self.num_obs = 6 + 63*7 + 200*7
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
             shape=(self.num_obs,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.MultiDiscrete([9, 13])
-        # self.single_action_space = gymnasium.spaces.Box(
-        #     low=-1, high=1, shape=(2,), dtype=np.float32
-        # )
+        self.single_action_space = gymnasium.spaces.Discrete(16384)
+        
         # Check if resources directory exists
         binary_path = "/datasets_local/yyin5/gpudrive_original/data/binaries/training/map_000000.bin"
         if not os.path.exists(binary_path):
@@ -89,7 +87,7 @@ class Drive(pufferlib.PufferEnv):
             log = binding.vec_log(self.c_envs)
             if log:
                 info.append(log)
-                #print(log)
+                
         if self.tick > 0 and self.resample_frequency > 0 and self.tick % self.resample_frequency == 0:
             self.tick = 0
             will_resample = 1

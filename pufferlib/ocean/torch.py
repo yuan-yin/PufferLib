@@ -823,8 +823,12 @@ class Drive(nn.Module):
             pufferlib.pytorch.layer_init(nn.Linear(3 * self.input_dim, self.hidden_dim)),
         )
         self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
+        self.is_multidiscrete = isinstance(env.single_action_space, pufferlib.spaces.MultiDiscrete)
 
-        self.atn_dim = env.single_action_space.nvec.tolist()
+        if self.is_multidiscrete:
+            self.atn_dim = env.single_action_space.nvec.tolist()
+        else:
+            self.atn_dim = [env.single_action_space.n]
         self.actor = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, sum(self.atn_dim)), std = 0.01)
         self.value_fn = pufferlib.pytorch.layer_init(
@@ -865,7 +869,8 @@ class Drive(nn.Module):
     
     def decode_actions(self, flat_hidden):
         action = self.actor(flat_hidden)
-        action = torch.split(action, self.atn_dim, dim=1)
+        if self.is_multidiscrete:
+            action = torch.split(action, self.atn_dim, dim=1)
         value = self.value_fn(flat_hidden)
         return action, value
 

@@ -118,9 +118,7 @@ static PyObject *my_shared(PyObject *self, PyObject *args, PyObject *kwargs)
         free(env);
     }
     if (total_agent_count >= num_agents)
-    {
         total_agent_count = num_agents;
-    }
     PyObject *final_total_agent_count = PyLong_FromLong(total_agent_count);
     PyList_SetItem(agent_offsets, env_count, final_total_agent_count);
     PyObject *final_env_count = PyLong_FromLong(env_count);
