@@ -348,7 +348,7 @@ static void traj_vocab_cleanup(void)
 static void traj_vocab_init_once(void)
 {
     /* Runs exactly once across all threads */
-    traj_vocab_init_status = t3_load_raw("/datasets_local/yyin5/gpudrive_original/data/binaries/traj_vocab_16384.bin", TRAJ_VOCAB_SIZE, TRAJ_VOCAB_LEN, TRAJ_VOCAB_DIM, &traj_vocab);
+    traj_vocab_init_status = t3_load_raw("/datasets_local/yyin5/gpudrive_original/data/binaries/smoothed_traj_vocab_16384.bin", TRAJ_VOCAB_SIZE, TRAJ_VOCAB_LEN, TRAJ_VOCAB_DIM, &traj_vocab);
 
     /* Optional: auto-cleanup at process exit */
     if (traj_vocab_init_status == 0) {
@@ -1157,7 +1157,7 @@ void allocate(Drive *env)
     init(env);
     int max_obs = DIM_EGO + DIM_PARTNER * (MAX_CARS - 1) + DIM_ROAD * MAX_ROAD_SEGMENT_OBSERVATIONS;
     env->observations = (float *)calloc(env->active_agent_count * max_obs, sizeof(float));
-    env->actions = (int *)calloc(env->active_agent_count, sizeof(float));
+    env->actions = (int *)calloc(env->active_agent_count, sizeof(int));
     env->rewards = (float *)calloc(env->active_agent_count, sizeof(float));
     env->terminals = (unsigned char *)calloc(env->active_agent_count, sizeof(unsigned char));
 }
@@ -1514,22 +1514,22 @@ void c_step(Drive *env)
                 {
                     if (env->entities[agent_idx].respawn_timestep != -1)
                     {
-                        env->rewards[i] += env->reward_vehicle_collision_post_respawn;
-                        env->logs[i].episode_return += env->reward_vehicle_collision_post_respawn;
+                        env->rewards[i] += env->reward_vehicle_collision_post_respawn / ((float)TRAJ_VOCAB_LEN);
+                        env->logs[i].episode_return += env->reward_vehicle_collision_post_respawn / ((float)TRAJ_VOCAB_LEN);
                     }
                     else
                     {
-                        env->rewards[i] += env->reward_vehicle_collision;
-                        env->logs[i].episode_return += env->reward_vehicle_collision;
+                        env->rewards[i] += env->reward_vehicle_collision / ((float)TRAJ_VOCAB_LEN);
+                        env->logs[i].episode_return += env->reward_vehicle_collision / ((float)TRAJ_VOCAB_LEN);
                         env->logs[i].clean_collision_rate = 1.0f;
                     }
                     env->logs[i].collision_rate = 1.0f;
                 }
                 else if (collision_state == OFFROAD)
                 {
-                    env->rewards[i] += env->reward_offroad_collision;
-                    env->logs[i].offroad_rate += 1.0f;
-                    env->logs[i].episode_return += env->reward_offroad_collision;
+                    env->rewards[i] += env->reward_offroad_collision / ((float)TRAJ_VOCAB_LEN);
+                    env->logs[i].offroad_rate = 1.0f;
+                    env->logs[i].episode_return += env->reward_offroad_collision / ((float)TRAJ_VOCAB_LEN);
                 }
                 if (!env->entities[agent_idx].reached_goal_this_episode)
                 {
