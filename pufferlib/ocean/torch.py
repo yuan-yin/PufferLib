@@ -790,6 +790,14 @@ class Drive(nn.Module):
         super().__init__()
         self.input_dim = input_size
         self.hidden_dim = hidden_size
+        self.subset_size = 1024
+        try:
+            speeds_path = 'sorted_smoothed_traj_speed_vocab_16384___.bin'
+            sorted_speeds = np.fromfile(speeds_path, dtype=np.float32)
+            self.sorted_speeds = torch.from_numpy(sorted_speeds)
+        except FileNotFoundError:
+            print("Warning: sorted_smoothed_traj_speed_vocab_16384.bin not found. Action masking will be disabled.")
+            self.sorted_speeds = None
         self.act_func = nn.Tanh() if act_func == "tanh" else nn.GELU()
         self.ego_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
@@ -836,7 +844,8 @@ class Drive(nn.Module):
     
     def forward_eval(self, observations, state=None):
         hidden = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden)
+        current_speeds = observations[:, 2] / 0.01
+        actions, value = self.decode_actions(hidden, current_speeds)
         return actions, value
 
     def forward(self, x, state=None):
@@ -867,12 +876,29 @@ class Drive(nn.Module):
         # embedding = self.shared_embedding(concat_features)
         return embedding
     
-    def decode_actions(self, flat_hidden):
+    def decode_actions(self, flat_hidden, current_speeds):
         action = self.actor(flat_hidden)
-        if self.is_multidiscrete:
-            action = torch.split(action, self.atn_dim, dim=1)
         value = self.value_fn(flat_hidden)
-        return action, value
+        if self.sorted_speeds is None:
+            if self.is_multidiscrete:
+                action = torch.split(action, self.atn_dim, dim=1)
+            return action, value
+        
+        with torch.no_grad():
+            center_indices = torch.searchsorted(self.sorted_speeds.to(device=action.device), current_speeds)
+            start_indices = center_indices - (self.subset_size // 2)
+            vocab_size = self.sorted_speeds.shape[0]
+            start_indices = torch.clamp(start_indices, 0, vocab_size - self.subset_size)
+
+            mask = torch.full_like(action, -torch.inf)
+        
+            indices = torch.arange(self.subset_size, device=action.device).unsqueeze(0)
+            valid_action_indices = start_indices.unsqueeze(1) + indices
+            mask.scatter_(1, valid_action_indices, 0)
+
+        masked_action = action + mask
+
+        return masked_action, value
 
 class Tetris(nn.Module):
     def __init__(

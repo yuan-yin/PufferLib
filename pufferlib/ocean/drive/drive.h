@@ -348,7 +348,7 @@ static void traj_vocab_cleanup(void)
 static void traj_vocab_init_once(void)
 {
     /* Runs exactly once across all threads */
-    traj_vocab_init_status = t3_load_raw("/datasets_local/yyin5/gpudrive_original/data/binaries/smoothed_traj_vocab_16384.bin", TRAJ_VOCAB_SIZE, TRAJ_VOCAB_LEN, TRAJ_VOCAB_DIM, &traj_vocab);
+    traj_vocab_init_status = t3_load_raw("/datasets_local/yyin5/gpudrive_original/data/binaries/sorted_smoothed_traj_vocab_16384.bin", TRAJ_VOCAB_SIZE, TRAJ_VOCAB_LEN, TRAJ_VOCAB_DIM, &traj_vocab);
 
     /* Optional: auto-cleanup at process exit */
     if (traj_vocab_init_status == 0) {
@@ -1183,20 +1183,14 @@ float clip_speed(float speed)
 
 float wrap_heading(float x)
 {
-    float y = fmodf(x + PI, 2.0f * PI);
-    if (y <= 0.0f)
-        y += 2.0f * PI;
-    return y - PI;
+    return atan2f(sinf(x), cosf(x));
 }
 
-void move_dynamics(Drive *env, int agent_idx, float acceleration, float steering)
+void move_dynamics(Entity *agent, float acceleration, float steering, int dynamics_model)
 {
-    if (env->dynamics_model == CLASSIC)
+    if (dynamics_model == CLASSIC)
     {
         // clip acceleration & steering
-        Entity *agent = &env->entities[agent_idx];
-
-        // Current state
         float x = agent->x;
         float y = agent->y;
         float heading = agent->heading;
@@ -1417,11 +1411,8 @@ void respawn_agent(Drive *env, int agent_idx)
     env->entities[agent_idx].respawn_timestep = env->timestep;
 }
 
-float compute_control_commands(Drive *env, int agent_idx, float target_x, float target_y, float *accel, float *steer)
+float compute_control_commands(Entity *agent, float dx, float dy, float *accel, float *steer)
 {
-    Entity *agent = &env->entities[agent_idx];
-    float dx = target_x - agent->x;
-    float dy = target_y - agent->y;
     float distance = sqrtf(dx * dx + dy * dy);
     float target_heading = atan2f(dy, dx);
     float heading_error = wrap_heading(target_heading - agent->heading);
@@ -1436,16 +1427,9 @@ float compute_control_commands(Drive *env, int agent_idx, float target_x, float 
     *accel = Kp_accel * speed_error;
     *steer = Kp_steer * heading_error;
 
-    // Clip the commands to their limits
-    if (*accel > MAX_ACCELERATION)
-        *accel = MAX_ACCELERATION;
-    if (*accel < MIN_ACCELERATION)
-        *accel = MIN_ACCELERATION;
-    if (*steer > MAX_STEERING_ANGLE)
-        *steer = MAX_STEERING_ANGLE;
-    if (*steer < -MAX_STEERING_ANGLE)
-        *steer = -MAX_STEERING_ANGLE;
-
+    // Clip the commands to their limits using fminf and fmaxf for conciseness
+    *accel = fmaxf(MIN_ACCELERATION, fminf(MAX_ACCELERATION, *accel));
+    *steer = fmaxf(MIN_STEERING_ANGLE, fminf(MAX_STEERING_ANGLE, *steer));
     return distance;
 }
 
@@ -1454,6 +1438,7 @@ void c_step(Drive *env)
     memset(env->rewards, 0, env->active_agent_count * sizeof(float));
     memset(env->terminals, 0, env->active_agent_count * sizeof(unsigned char));
     env->timestep++;
+    // printf("timestep: %d\n", env->timestep);
     if (env->timestep == TRAJECTORY_LENGTH)
     {
         add_log(env);
@@ -1467,9 +1452,6 @@ void c_step(Drive *env)
         env->logs[i].episode_length += 1;
         int agent_idx = env->active_agent_indices[i];
         env->entities[agent_idx].collision_state = 0;
-        env->entities[agent_idx].reached_goal = 0;
-        env->entities[agent_idx].collided_before_goal = 0;
-        env->entities[agent_idx].reached_goal_this_episode = 0;
     }
 
     for (int k = 0; k < TRAJ_VOCAB_LEN; k++)
@@ -1490,15 +1472,28 @@ void c_step(Drive *env)
             // Extract action components directly from the multi-discrete action array
             int (*action_array) = (int (*))env->actions;
             int traj_index = action_array[i];
+            //printf("traj_index: %d\n", traj_index);
             // int steer_idx = action_array[i][1];
-            float next_x = T3_GET(&traj_vocab, traj_index, k, 0);
-            float next_y = T3_GET(&traj_vocab, traj_index, k, 1);
+            float local_x = T3_GET(&traj_vocab, traj_index, k, 0);
+            float local_y = T3_GET(&traj_vocab, traj_index, k, 1);
+
+            Entity *agent = &env->entities[agent_idx];
+            float cos_h = agent->heading_x;
+            float sin_h = agent->heading_y;
+
+            // Rotate and translate the local trajectory point to the global frame
+            float dx = local_x * cos_h - local_y * sin_h;
+            float dy = local_x * sin_h + local_y * cos_h;
 
             float accel = 0.0f;
             float steer = 0.0f;
-            compute_control_commands(env, agent_idx, next_x, next_y, &accel, &steer);
 
-            move_dynamics(env, agent_idx, accel, steer);
+            compute_control_commands(agent, dx, dy, &accel, &steer);
+            // printf("accel: %f, steer: %f\n", accel, steer);
+            // printf("x: %f, y: %f\n", agent->x, agent->y);
+            move_dynamics(agent, accel, steer, env->dynamics_model);
+
+            // printf("x: %f, y: %f\n", agent->x, agent->y);
         }
 
         for (int i = 0; i < env->active_agent_count; i++)
@@ -1547,12 +1542,12 @@ void c_step(Drive *env)
             {
                 if (env->entities[agent_idx].respawn_timestep != -1)
                 {
-                    env->rewards[i] += env->reward_goal_post_respawn;
+                    env->rewards[i] += env->reward_goal_post_respawn / ((float)TRAJ_VOCAB_LEN);
                     env->logs[i].episode_return += env->reward_goal_post_respawn;
                 }
                 else
                 {
-                    env->rewards[i] += 1.0f;
+                    env->rewards[i] += 1.0f / ((float)TRAJ_VOCAB_LEN);
                     env->logs[i].episode_return += 1.0f;
                     // env->terminals[i] = 1;
                 }
@@ -1578,7 +1573,7 @@ void c_step(Drive *env)
                 // env->entities[agent_idx].respawn_timestep = env->timestep;
             }
         }
-        if (k == 0)
+        if (k == 0) // Save the next state
         {
             for (int i = 0; i < env->active_agent_count; i++){
                 int agent_idx = env->active_agent_indices[i];
@@ -1591,6 +1586,8 @@ void c_step(Drive *env)
             }
         }
     }
+
+    // Recover the stored state as next state
 
     for (int i = 0; i < env->active_agent_count; i++){
         int agent_idx = env->active_agent_indices[i];
