@@ -232,7 +232,8 @@ class PuffeRL:
 
             done_mask = d + t # TODO: Handle truncations separately
             self.global_step += int(mask.sum())
-            print("********global_step********", self.global_step, int(mask.sum()))
+            #print("********global_step********", self.global_step, int(mask.sum()))
+            
 
             profile('eval_copy', epoch)
             o = torch.as_tensor(o)

@@ -73,8 +73,9 @@
 #define MIN_STEERING_ANGLE -0.6f
 
 // Acceleration Values
-// static const float ACCELERATION_VALUES[9] = {-4.0000f, -3.0000f, -2.0000f, -1.0000f, -0.0000f, 1.0000f, 2.0000f, 3.0000f, 4.0000f};
-// static const float STEERING_VALUES[13] = {-0.6f, -0.5f, -0.4f, -0.3f, -0.2f, -0.1f, 0.f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f};
+static const float ACCELERATION_VALUES[9] = {-4.0000f, -3.0000f, -2.0000f, -1.0000f, -0.0000f, 1.0000f, 2.0000f, 3.0000f, 4.0000f};
+static const float STEERING_VALUES[13] = {-0.6f, -0.5f, -0.4f, -0.3f, -0.2f, -0.1f, 0.f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f};
+
 static const float offsets[4][2] = {
     {-1, 1}, // top-left
     {1, 1},  // top-right
@@ -83,7 +84,7 @@ static const float offsets[4][2] = {
 };
 
 #define TRAJ_VOCAB_SIZE 16384
-#define TRAJ_VOCAB_LEN 40
+#define TRAJ_VOCAB_LEN 5
 #define TRAJ_VOCAB_DIM 3
 #define T3_INDEX(t,i,j,k) ( ((size_t)(i) * (t)->n2 + (size_t)(j)) * (t)->n3 + (size_t)(k) )
 #define T3_GET(t,i,j,k)   ( (t)->data[T3_INDEX((t),(i),(j),(k))] )
@@ -1470,30 +1471,33 @@ void c_step(Drive *env)
         {
             int agent_idx = env->active_agent_indices[i];
             // Extract action components directly from the multi-discrete action array
-            int (*action_array) = (int (*))env->actions;
-            int traj_index = action_array[i];
-            //printf("traj_index: %d\n", traj_index);
-            // int steer_idx = action_array[i][1];
-            float local_x = T3_GET(&traj_vocab, traj_index, k, 0);
-            float local_y = T3_GET(&traj_vocab, traj_index, k, 1);
+            // int (*action_array) = (int (*))env->actions;
+            // int traj_index = action_array[i];
+            // //printf("traj_index: %d\n", traj_index);
+            // // int steer_idx = action_array[i][1];
+            // float local_x = T3_GET(&traj_vocab, traj_index, k, 0);
+            // float local_y = T3_GET(&traj_vocab, traj_index, k, 1);
 
             Entity *agent = &env->entities[agent_idx];
-            float cos_h = agent->heading_x;
-            float sin_h = agent->heading_y;
+            int (*action_array)[2] = (int (*)[2])env->actions;
+            int acceleration_index = action_array[i][0];
+            int steering_index = action_array[i][1];
+            float accel = ACCELERATION_VALUES[acceleration_index];
+            float steer = STEERING_VALUES[steering_index];
+            // float cos_h = agent->heading_x;
+            // float sin_h = agent->heading_y;
 
             // Rotate and translate the local trajectory point to the global frame
-            float dx = local_x * cos_h - local_y * sin_h;
-            float dy = local_x * sin_h + local_y * cos_h;
+            // float dx = local_x * cos_h - local_y * sin_h;
+            // float dy = local_x * sin_h + local_y * cos_h;
 
-            float accel = 0.0f;
-            float steer = 0.0f;
+            // float accel = 0.0f;
+            // float steer = 0.0f;
 
-            compute_control_commands(agent, dx, dy, &accel, &steer);
+            // compute_control_commands(agent, dx, dy, &accel, &steer);
             // printf("accel: %f, steer: %f\n", accel, steer);
             // printf("x: %f, y: %f\n", agent->x, agent->y);
             move_dynamics(agent, accel, steer, env->dynamics_model);
-
-            // printf("x: %f, y: %f\n", agent->x, agent->y);
         }
 
         for (int i = 0; i < env->active_agent_count; i++)
