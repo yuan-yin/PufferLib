@@ -71,9 +71,10 @@
 #define MAX_STEERING_ANGLE 0.6f
 #define MIN_ACCELERATION -4.0f
 #define MIN_STEERING_ANGLE -0.6f
+#define DISCOUNT_FACTOR 0.99f
 
 // Acceleration Values
-static const float ACCELERATION_VALUES[9] = {-4.0000f, -3.0000f, -2.0000f, -1.0000f, -0.0000f, 1.0000f, 2.0000f, 3.0000f, 4.0000f};
+static const float ACCELERATION_VALUES[9] = {-4.0000f, -3.0000f, -2.0000f, -1.0000f, 0.0000f, 1.0000f, 2.0000f, 3.0000f, 4.0000f};
 static const float STEERING_VALUES[13] = {-0.6f, -0.5f, -0.4f, -0.3f, -0.2f, -0.1f, 0.f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f};
 
 static const float offsets[4][2] = {
@@ -337,32 +338,32 @@ static int t3_load_raw(const char *filename,
     return 0;
 }
 
-static void traj_vocab_cleanup(void)
-{
-    if (traj_vocab.data) {
-        free(traj_vocab.data);
-        traj_vocab.data = NULL;
-    }
-    traj_vocab.n1 = traj_vocab.n2 = traj_vocab.n3 = 0;
-}
+// static void traj_vocab_cleanup(void)
+// {
+//     if (traj_vocab.data) {
+//         free(traj_vocab.data);
+//         traj_vocab.data = NULL;
+//     }
+//     traj_vocab.n1 = traj_vocab.n2 = traj_vocab.n3 = 0;
+// }
 
-static void traj_vocab_init_once(void)
-{
-    /* Runs exactly once across all threads */
-    traj_vocab_init_status = t3_load_raw("/datasets_local/yyin5/gpudrive_original/data/binaries/sorted_smoothed_traj_vocab_16384.bin", TRAJ_VOCAB_SIZE, TRAJ_VOCAB_LEN, TRAJ_VOCAB_DIM, &traj_vocab);
+// static void traj_vocab_init_once(void)
+// {
+//     /* Runs exactly once across all threads */
+//     traj_vocab_init_status = t3_load_raw("/datasets_local/yyin5/gpudrive_original/data/binaries/sorted_smoothed_traj_vocab_16384.bin", TRAJ_VOCAB_SIZE, TRAJ_VOCAB_LEN, TRAJ_VOCAB_DIM, &traj_vocab);
 
-    /* Optional: auto-cleanup at process exit */
-    if (traj_vocab_init_status == 0) {
-        atexit(traj_vocab_cleanup);
-    }
-}
+//     /* Optional: auto-cleanup at process exit */
+//     if (traj_vocab_init_status == 0) {
+//         atexit(traj_vocab_cleanup);
+//     }
+// }
 
-/* Public API: ensure tensor is loaded once; return 0 on success */
-int ensure_tensor_loaded(void)
-{
-    pthread_once(&g_once, traj_vocab_init_once);
-    return traj_vocab_init_status;
-}
+// /* Public API: ensure tensor is loaded once; return 0 on success */
+// int ensure_tensor_loaded(void)
+// {
+//     pthread_once(&g_once, traj_vocab_init_once);
+//     return traj_vocab_init_status;
+// }
 
 Entity *load_map_binary(const char *filename, Drive *env)
 {
@@ -1115,11 +1116,11 @@ void remove_bad_trajectories(Drive *env)
 
 void init(Drive *env)
 {
-    if (ensure_tensor_loaded() != 0) {
-        fprintf(stderr, "Failed to load %s (status=%d)\n",
-                "/datasets_local/yyin5/gpudrive_original/data/binaries/traj_vocab_16384.bin", traj_vocab_init_status);
-        return 1;
-    }
+    // if (ensure_tensor_loaded() != 0) {
+    //     fprintf(stderr, "Failed to load %s (status=%d)\n",
+    //             "/datasets_local/yyin5/gpudrive_original/data/binaries/traj_vocab_16384.bin", traj_vocab_init_status);
+    //     return 1;
+    // }
     env->human_agent_idx = 0;
     env->timestep = 0;
     env->entities = load_map_binary(env->map_name, env);
@@ -1457,7 +1458,6 @@ void c_step(Drive *env)
 
     for (int k = 0; k < TRAJ_VOCAB_LEN; k++)
     {
-        // Move static experts
         for (int i = 0; i < env->expert_static_car_count; i++)
         {
             int expert_idx = env->expert_static_car_indices[i];
@@ -1479,9 +1479,10 @@ void c_step(Drive *env)
             // float local_y = T3_GET(&traj_vocab, traj_index, k, 1);
 
             Entity *agent = &env->entities[agent_idx];
-            int (*action_array)[2] = (int (*)[2])env->actions;
-            int acceleration_index = action_array[i][0];
-            int steering_index = action_array[i][1];
+            int (*action_array)[2 * TRAJ_VOCAB_LEN] = (int (*)[2 * TRAJ_VOCAB_LEN])env->actions;
+            int acceleration_index = action_array[i][k * 2 + 0];
+            int steering_index = action_array[i][k * 2 + 1];
+            // printf("acceleration_index: %d, steering_index: %d\n", acceleration_index, steering_index);
             float accel = ACCELERATION_VALUES[acceleration_index];
             float steer = STEERING_VALUES[steering_index];
             // float cos_h = agent->heading_x;
@@ -1500,6 +1501,9 @@ void c_step(Drive *env)
             move_dynamics(agent, accel, steer, env->dynamics_model);
         }
 
+        float temporal_discount = powf(DISCOUNT_FACTOR, (float) k); 
+        bool is_immediate_next_step = (k == 0); // when k > 0 the collisions are virtural
+
         for (int i = 0; i < env->active_agent_count; i++)
         {
             int agent_idx = env->active_agent_indices[i];
@@ -1513,24 +1517,27 @@ void c_step(Drive *env)
                 {
                     if (env->entities[agent_idx].respawn_timestep != -1)
                     {
-                        env->rewards[i] += env->reward_vehicle_collision_post_respawn / ((float)TRAJ_VOCAB_LEN);
-                        env->logs[i].episode_return += env->reward_vehicle_collision_post_respawn / ((float)TRAJ_VOCAB_LEN);
+                        env->rewards[i] += env->reward_vehicle_collision_post_respawn * temporal_discount;
+                        env->logs[i].episode_return += env->reward_vehicle_collision_post_respawn * temporal_discount;
                     }
                     else
                     {
-                        env->rewards[i] += env->reward_vehicle_collision / ((float)TRAJ_VOCAB_LEN);
-                        env->logs[i].episode_return += env->reward_vehicle_collision / ((float)TRAJ_VOCAB_LEN);
-                        env->logs[i].clean_collision_rate = 1.0f;
+                        env->rewards[i] += env->reward_vehicle_collision * temporal_discount;
+                        env->logs[i].episode_return += env->reward_vehicle_collision * temporal_discount;
+                        if (is_immediate_next_step) 
+                            env->logs[i].clean_collision_rate = 1.0f;
                     }
-                    env->logs[i].collision_rate = 1.0f;
+                    if (is_immediate_next_step)
+                        env->logs[i].collision_rate = 1.0f;
                 }
                 else if (collision_state == OFFROAD)
                 {
-                    env->rewards[i] += env->reward_offroad_collision / ((float)TRAJ_VOCAB_LEN);
-                    env->logs[i].offroad_rate = 1.0f;
-                    env->logs[i].episode_return += env->reward_offroad_collision / ((float)TRAJ_VOCAB_LEN);
+                    env->rewards[i] += env->reward_offroad_collision * temporal_discount;
+                    if (is_immediate_next_step) 
+                        env->logs[i].offroad_rate = 1.0f;
+                    env->logs[i].episode_return += env->reward_offroad_collision * temporal_discount;
                 }
-                if (!env->entities[agent_idx].reached_goal_this_episode)
+                if (!env->entities[agent_idx].reached_goal_this_episode && is_immediate_next_step)
                 {
                     env->entities[agent_idx].collided_before_goal = 1;
                 }
@@ -1546,17 +1553,17 @@ void c_step(Drive *env)
             {
                 if (env->entities[agent_idx].respawn_timestep != -1)
                 {
-                    env->rewards[i] += env->reward_goal_post_respawn / ((float)TRAJ_VOCAB_LEN);
-                    env->logs[i].episode_return += env->reward_goal_post_respawn;
+                    env->rewards[i] += env->reward_goal_post_respawn * temporal_discount;
+                    env->logs[i].episode_return += env->reward_goal_post_respawn * temporal_discount;
                 }
                 else
                 {
-                    env->rewards[i] += 1.0f / ((float)TRAJ_VOCAB_LEN);
+                    env->rewards[i] += 1.0f * temporal_discount;
                     env->logs[i].episode_return += 1.0f;
                     // env->terminals[i] = 1;
                 }
 
-                if (k == 0)
+                if (is_immediate_next_step)
                 {
                     env->entities[agent_idx].reached_goal = 1;
                     env->entities[agent_idx].reached_goal_this_episode = 1;
@@ -1564,21 +1571,22 @@ void c_step(Drive *env)
             }
         }
 
-        for (int i = 0; i < env->active_agent_count; i++)
+        if (is_immediate_next_step)
         {
-            int agent_idx = env->active_agent_indices[i];
-            int reached_goal = env->entities[agent_idx].reached_goal;
-            int collision_state = env->entities[agent_idx].collision_state;
-            if (reached_goal)
+            for (int i = 0; i < env->active_agent_count; i++)
             {
-                respawn_agent(env, agent_idx);
-                // env->entities[agent_idx].x = -10000;
-                // env->entities[agent_idx].y = -10000;
-                // env->entities[agent_idx].respawn_timestep = env->timestep;
+                int agent_idx = env->active_agent_indices[i];
+                int reached_goal = env->entities[agent_idx].reached_goal;
+                int collision_state = env->entities[agent_idx].collision_state;
+                if (reached_goal)
+                {
+                    respawn_agent(env, agent_idx);
+                    // env->entities[agent_idx].x = -10000;
+                    // env->entities[agent_idx].y = -10000;
+                    // env->entities[agent_idx].respawn_timestep = env->timestep;
+                }
             }
-        }
-        if (k == 0) // Save the next state
-        {
+            
             for (int i = 0; i < env->active_agent_count; i++){
                 int agent_idx = env->active_agent_indices[i];
                 entity_save(&env->entities[agent_idx]);

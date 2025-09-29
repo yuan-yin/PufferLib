@@ -790,7 +790,13 @@ class Drive(nn.Module):
         super().__init__()
         self.input_dim = input_size
         self.hidden_dim = hidden_size
-        self.subset_size = 1024
+
+        self.rnn_actor = True
+
+        def layer_init_(layer, std=np.sqrt(2), bias_const=0.0):
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+            return layer
         try:
             speeds_path = 'sorted_smoothed_traj_speed_vocab_16384___.bin'
             sorted_speeds = np.fromfile(speeds_path, dtype=np.float32)
@@ -800,35 +806,35 @@ class Drive(nn.Module):
             self.sorted_speeds = None
         self.act_func = nn.Tanh() if act_func == "tanh" else nn.GELU()
         self.ego_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(
+            layer_init_(
                 nn.Linear(6, self.input_dim)),
             nn.LayerNorm(self.input_dim),
             self.act_func,
             # nn.Dropout(p=dropout_rate),
-            pufferlib.pytorch.layer_init(
+            layer_init_(
                 nn.Linear(self.input_dim, self.input_dim))
         )
         self.road_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(
+            layer_init_(
                 nn.Linear(13, self.input_dim)),
             nn.LayerNorm(self.input_dim),
             self.act_func,
             # nn.Dropout(p=dropout_rate),
-            pufferlib.pytorch.layer_init(
+            layer_init_(
                 nn.Linear(self.input_dim, self.input_dim))
         )
         self.partner_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(
+            layer_init_(
                 nn.Linear(7, self.input_dim)),
             nn.LayerNorm(self.input_dim),
             self.act_func,
             # nn.Dropout(p=dropout_rate),
-            pufferlib.pytorch.layer_init(
+            layer_init_(
                 nn.Linear(self.input_dim, self.input_dim))
         )
 
         self.shared_embedding = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(3 * self.input_dim, self.hidden_dim)),
+            layer_init_(nn.Linear(3 * self.input_dim, self.hidden_dim)),
         )
         self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
         self.is_multidiscrete = isinstance(env.single_action_space, pufferlib.spaces.MultiDiscrete)
@@ -837,9 +843,16 @@ class Drive(nn.Module):
             self.atn_dim = env.single_action_space.nvec.tolist()
         else:
             self.atn_dim = [env.single_action_space.n]
-        self.actor = pufferlib.pytorch.layer_init(
+
+        if self.rnn_actor:
+            self.horizon = 5
+            self.gru_cell = nn.GRUCell(hidden_size, hidden_size)
+            self.actor = layer_init_(
+                nn.Linear(hidden_size, sum(self.atn_dim) // self.horizon), std = 0.01)
+        else:
+            self.actor = layer_init_(
                 nn.Linear(hidden_size, sum(self.atn_dim)), std = 0.01)
-        self.value_fn = pufferlib.pytorch.layer_init(
+        self.value_fn = layer_init_(
                 nn.Linear(hidden_size, 1), std=1)
     
     def forward_eval(self, observations, state=None):
@@ -877,28 +890,35 @@ class Drive(nn.Module):
         return embedding
     
     def decode_actions(self, flat_hidden, current_speeds):
-        action = self.actor(flat_hidden)
+        if self.rnn_actor:
+            output = []
+            h = torch.zeros_like(flat_hidden)
+            for _ in range(self.horizon):
+                h = self.gru_cell(flat_hidden, h)
+                output.append(self.actor(h))
+            action = torch.concat(output, dim=1)
+        else:
+            action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
         if self.sorted_speeds is None:
             if self.is_multidiscrete:
                 action = torch.split(action, self.atn_dim, dim=1)
-            return action, value
-        
-        with torch.no_grad():
-            center_indices = torch.searchsorted(self.sorted_speeds.to(device=action.device), current_speeds)
-            start_indices = center_indices - (self.subset_size // 2)
-            vocab_size = self.sorted_speeds.shape[0]
-            start_indices = torch.clamp(start_indices, 0, vocab_size - self.subset_size)
+                return action, value
+        else:
+            with torch.no_grad():
+                center_indices = torch.searchsorted(self.sorted_speeds.to(device=action.device), current_speeds)
+                start_indices = center_indices - (self.subset_size // 2)
+                vocab_size = self.sorted_speeds.shape[0]
+                start_indices = torch.clamp(start_indices, 0, vocab_size - self.subset_size)
 
-            mask = torch.full_like(action, -torch.inf)
-        
-            indices = torch.arange(self.subset_size, device=action.device).unsqueeze(0)
-            valid_action_indices = start_indices.unsqueeze(1) + indices
-            mask.scatter_(1, valid_action_indices, 0)
+                mask = torch.full_like(action, -torch.inf)
+            
+                indices = torch.arange(self.subset_size, device=action.device).unsqueeze(0)
+                valid_action_indices = start_indices.unsqueeze(1) + indices
+                mask.scatter_(1, valid_action_indices, 0)
 
-        masked_action = action + mask
-
-        return masked_action, value
+            masked_action = action + mask
+            return masked_action, value
 
 class Tetris(nn.Module):
     def __init__(

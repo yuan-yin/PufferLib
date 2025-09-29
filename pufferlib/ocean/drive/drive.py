@@ -36,7 +36,7 @@ class Drive(pufferlib.PufferEnv):
         self.num_obs = 6 + 63*7 + 200*7
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
             shape=(self.num_obs,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.MultiDiscrete([13, 9])
+        self.single_action_space = gymnasium.spaces.MultiDiscrete([13, 9] * 5)
         
         # Check if resources directory exists
         binary_path = "/datasets_local/yyin5/gpudrive_original/data/binaries/training/map_000000.bin"
