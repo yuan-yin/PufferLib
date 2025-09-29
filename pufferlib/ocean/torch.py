@@ -791,7 +791,7 @@ class Drive(nn.Module):
         self.input_dim = input_size
         self.hidden_dim = hidden_size
 
-        self.rnn_actor = True
+        self.rnn_actor = False
 
         def layer_init_(layer, std=np.sqrt(2), bias_const=0.0):
             torch.nn.init.orthogonal_(layer.weight, std)
