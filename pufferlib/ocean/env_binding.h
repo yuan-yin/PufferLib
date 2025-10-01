@@ -518,6 +518,7 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     }
 
     for (int i = 0; i < vec->num_envs; i++) {
+        // printf("Stepping env %d\n", i);
         c_step(vec->envs[i]);
     }
     Py_RETURN_NONE;

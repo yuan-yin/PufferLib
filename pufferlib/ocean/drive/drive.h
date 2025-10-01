@@ -71,7 +71,9 @@
 #define MAX_STEERING_ANGLE 0.6f
 #define MIN_ACCELERATION -4.0f
 #define MIN_STEERING_ANGLE -0.6f
-#define DISCOUNT_FACTOR 0.99f
+
+#define DISCOUNT_FACTOR 0.9f
+#define RADIUS_GOAL 2.0f
 
 // Acceleration Values
 static const float ACCELERATION_VALUES[9] = {-4.0000f, -3.0000f, -2.0000f, -1.0000f, 0.0000f, 1.0000f, 2.0000f, 3.0000f, 4.0000f};
@@ -90,6 +92,8 @@ static const float offsets[4][2] = {
 #define T3_INDEX(t,i,j,k) ( ((size_t)(i) * (t)->n2 + (size_t)(j)) * (t)->n3 + (size_t)(k) )
 #define T3_GET(t,i,j,k)   ( (t)->data[T3_INDEX((t),(i),(j),(k))] )
 #define T3_SET(t,i,j,k,v) ( (t)->data[T3_INDEX((t),(i),(j),(k))] = (v) )
+
+#define DEBUG 0
 
 static const int collision_offsets[25][2] = {
     {-2, -2}, {-1, -2}, {0, -2}, {1, -2}, {2, -2}, // Top row
@@ -158,6 +162,7 @@ struct Entity
     float heading_y;
     int valid;
     int reached_goal;
+    int reached_goal_in_horizon;
     int respawn_timestep;
     int collided_before_goal;
     int reached_goal_this_episode;
@@ -456,6 +461,7 @@ void set_start_position(Drive *env)
             e->vy = 0;
             e->vz = 0;
             e->reached_goal = 0;
+            e->reached_goal_in_horizon = 0;
             e->collided_before_goal = 0;
         }
         else
@@ -743,13 +749,13 @@ void set_means(Drive *env)
     }
 }
 
-void move_expert(Drive *env, int agent_idx)
+void move_expert(Drive *env, int agent_idx, int timestep)
 {
     Entity *agent = &env->entities[agent_idx];
-    agent->x = agent->traj_x[env->timestep];
-    agent->y = agent->traj_y[env->timestep];
-    agent->z = agent->traj_z[env->timestep];
-    agent->heading = agent->traj_heading[env->timestep];
+    agent->x = agent->traj_x[timestep];
+    agent->y = agent->traj_y[timestep];
+    agent->z = agent->traj_z[timestep];
+    agent->heading = agent->traj_heading[timestep];
     agent->heading_x = cosf(agent->heading);
     agent->heading_y = sinf(agent->heading);
 }
@@ -1074,14 +1080,14 @@ void remove_bad_trajectories(Drive *env)
         for (int i = 0; i < env->active_agent_count; i++)
         {
             int agent_idx = env->active_agent_indices[i];
-            move_expert(env, agent_idx);
+            move_expert(env, agent_idx, env->timestep);
         }
         for (int i = 0; i < env->expert_static_car_count; i++)
         {
             int expert_idx = env->expert_static_car_indices[i];
             if (env->entities[expert_idx].x == -10000)
                 continue;
-            move_expert(env, expert_idx);
+            move_expert(env, expert_idx, env->timestep);
         }
         // check collisions
         for (int i = 0; i < env->active_agent_count; i++)
@@ -1393,6 +1399,7 @@ void c_reset(Drive *env)
         int agent_idx = env->active_agent_indices[x];
         env->entities[agent_idx].respawn_timestep = -1;
         env->entities[agent_idx].reached_goal = 0;
+        env->entities[agent_idx].reached_goal_in_horizon = 0;
         env->entities[agent_idx].collided_before_goal = 0;
         env->entities[agent_idx].reached_goal_this_episode = 0;
         collision_check(env, agent_idx);
@@ -1410,6 +1417,7 @@ void respawn_agent(Drive *env, int agent_idx)
     env->entities[agent_idx].vx = env->entities[agent_idx].traj_vx[0];
     env->entities[agent_idx].vy = env->entities[agent_idx].traj_vy[0];
     env->entities[agent_idx].reached_goal = 0;
+    env->entities[agent_idx].reached_goal_in_horizon = 0;
     env->entities[agent_idx].respawn_timestep = env->timestep;
 }
 
@@ -1440,7 +1448,7 @@ void c_step(Drive *env)
     memset(env->rewards, 0, env->active_agent_count * sizeof(float));
     memset(env->terminals, 0, env->active_agent_count * sizeof(unsigned char));
     env->timestep++;
-    // printf("timestep: %d\n", env->timestep);
+    if (DEBUG) printf("timestep: %d\n", env->timestep);
     if (env->timestep == TRAJECTORY_LENGTH)
     {
         add_log(env);
@@ -1454,16 +1462,23 @@ void c_step(Drive *env)
         env->logs[i].episode_length += 1;
         int agent_idx = env->active_agent_indices[i];
         env->entities[agent_idx].collision_state = 0;
+        env->entities[agent_idx].reached_goal_in_horizon = env->entities[agent_idx].reached_goal;
     }
 
     for (int k = 0; k < TRAJ_VOCAB_LEN; k++)
     {
+        float temporal_discount = powf(DISCOUNT_FACTOR, (float) k) / (float) TRAJ_VOCAB_LEN; 
+        bool is_immediate_next_step = (k == 0); // when k > 0 the collisions are virtural
+
+        if (DEBUG) printf("\ttemporal_discount: %f\n", temporal_discount);
+
         for (int i = 0; i < env->expert_static_car_count; i++)
         {
             int expert_idx = env->expert_static_car_indices[i];
             if (env->entities[expert_idx].x == -10000.0f)
                 continue;
-            move_expert(env, expert_idx);
+            if (env->timestep + k < TRAJECTORY_LENGTH)
+                move_expert(env, expert_idx, env->timestep + k);
         }
 
         // Process actions for all active agents
@@ -1479,9 +1494,10 @@ void c_step(Drive *env)
             // float local_y = T3_GET(&traj_vocab, traj_index, k, 1);
 
             Entity *agent = &env->entities[agent_idx];
-            int (*action_array)[2 * TRAJ_VOCAB_LEN] = (int (*)[2 * TRAJ_VOCAB_LEN])env->actions;
-            int acceleration_index = action_array[i][k * 2 + 0];
-            int steering_index = action_array[i][k * 2 + 1];
+            int (*action_array)[2] = (int (*)[2])env->actions;
+
+            int steering_index = action_array[i][0];
+            int acceleration_index = action_array[i][1];
             // printf("acceleration_index: %d, steering_index: %d\n", acceleration_index, steering_index);
             float accel = ACCELERATION_VALUES[acceleration_index];
             float steer = STEERING_VALUES[steering_index];
@@ -1501,48 +1517,53 @@ void c_step(Drive *env)
             move_dynamics(agent, accel, steer, env->dynamics_model);
         }
 
-        float temporal_discount = powf(DISCOUNT_FACTOR, (float) k); 
-        bool is_immediate_next_step = (k == 0); // when k > 0 the collisions are virtural
-
         for (int i = 0; i < env->active_agent_count; i++)
         {
             int agent_idx = env->active_agent_indices[i];
-            if (env->entities[agent_idx].collision_state == 0) {
-                collision_check(env, agent_idx);
+            int pre_collision_state = env->entities[agent_idx].collision_state;
+            
+            if (pre_collision_state == NO_COLLISION) { // if no collision before
+                collision_check(env, agent_idx); // check the collision
                 int collision_state = env->entities[agent_idx].collision_state;
 
-                if (collision_state > 0)
+                switch (collision_state)
                 {
-                    if (collision_state == VEHICLE_COLLISION && env->entities[agent_idx].respawn_timestep == -1)
+                case VEHICLE_COLLISION:
+                    if (is_immediate_next_step)
+                        env->logs[i].collision_rate = 1.0f;
+
+                    if (env->entities[agent_idx].respawn_timestep != -1)
                     {
-                        if (env->entities[agent_idx].respawn_timestep != -1)
-                        {
-                            env->rewards[i] = env->reward_vehicle_collision_post_respawn * temporal_discount;
-                            env->logs[i].episode_return += env->reward_vehicle_collision_post_respawn * temporal_discount;
-                        }
-                        else
-                        {
-                            env->rewards[i] = env->reward_vehicle_collision * temporal_discount;
-                            env->logs[i].episode_return += env->reward_vehicle_collision * temporal_discount;
-                            if (is_immediate_next_step) 
-                                env->logs[i].clean_collision_rate = 1.0f;
-                        }
-                        if (is_immediate_next_step)
-                            env->logs[i].collision_rate = 1.0f;
+                        env->rewards[i] += env->reward_vehicle_collision_post_respawn * temporal_discount;
+                        env->logs[i].episode_return += env->reward_vehicle_collision_post_respawn * temporal_discount;
                     }
-                    else if (collision_state == OFFROAD)
+                    else
                     {
-                        env->rewards[i] = env->reward_offroad_collision * temporal_discount;
                         if (is_immediate_next_step) 
-                            env->logs[i].offroad_rate = 1.0f;
-                        env->logs[i].episode_return += env->reward_offroad_collision * temporal_discount;
+                            env->logs[i].clean_collision_rate = 1.0f;
+
+                        env->rewards[i] += env->reward_vehicle_collision * temporal_discount;
+                        env->logs[i].episode_return += env->reward_vehicle_collision * temporal_discount;
+
                     }
-                    if (!env->entities[agent_idx].reached_goal_this_episode && is_immediate_next_step)
-                    {
-                        env->entities[agent_idx].collided_before_goal = 1;
-                    }
-                    // printf("agent %d collided\n", agent_idx);
+                    if (DEBUG) printf("\tagent_idx: %d, k: %d, reward: %f, collision_state: %d\n", agent_idx, k, env->rewards[i], collision_state);
+
+                    break;
+                case OFFROAD:
+                    if (is_immediate_next_step) 
+                        env->logs[i].offroad_rate = 1.0f;
+
+                    env->rewards[i] += env->reward_offroad_collision * temporal_discount;
+                    env->logs[i].episode_return += env->reward_offroad_collision * temporal_discount;
+                    if (DEBUG) printf("\tagent_idx: %d, k: %d, reward: %f, collision_state: %d\n", agent_idx, k, env->rewards[i], collision_state);
+                    break;
+                
+                default:
+                    break;
                 }
+                
+                if (collision_state > NO_COLLISION && !env->entities[agent_idx].reached_goal_this_episode && is_immediate_next_step)
+                    env->entities[agent_idx].collided_before_goal = 1;
             }
 
             float distance_to_goal = relative_distance_2d(
@@ -1550,7 +1571,8 @@ void c_step(Drive *env)
                 env->entities[agent_idx].y,
                 env->entities[agent_idx].goal_position_x,
                 env->entities[agent_idx].goal_position_y);
-            if (distance_to_goal < 2.0f)
+
+            if (env->entities[agent_idx].reached_goal_in_horizon == 0 && (distance_to_goal < RADIUS_GOAL))
             {
                 if (env->entities[agent_idx].respawn_timestep != -1)
                 {
@@ -1560,17 +1582,18 @@ void c_step(Drive *env)
                 else
                 {
                     env->rewards[i] += 1.0f * temporal_discount;
-                    env->logs[i].episode_return += 1.0f;
-                    // env->terminals[i] = 1;
+                    env->logs[i].episode_return += 1.0f * temporal_discount;
                 }
-
-                if (is_immediate_next_step)
-                {
-                    env->entities[agent_idx].reached_goal = 1;
-                    env->entities[agent_idx].reached_goal_this_episode = 1;
-                }
+                env->entities[agent_idx].reached_goal_in_horizon = 1;
+            }
+            
+            if (is_immediate_next_step && (distance_to_goal < RADIUS_GOAL))
+            {
+                env->entities[agent_idx].reached_goal = 1;
+                env->entities[agent_idx].reached_goal_this_episode = 1;
             }
         }
+
 
         if (is_immediate_next_step)
         {
